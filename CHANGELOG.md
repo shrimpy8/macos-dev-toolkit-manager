@@ -1,13 +1,13 @@
 # Changelog
-## macOS Dev Toolkit Manager (formerly System Upgrade Manager)
+## macOS Dev Toolkit Manager 
 
 All notable changes to this project will be documented in this file.
 
 ## [1.2.0] - 2025-11-06
 
 ### Changed - Project Renamed
-- **Project folder**: `system-upgrade-manager` → `macos-dev-toolkit-manager`
-- **Script name**: `system_upgrade.py` → `safe_update.py`
+- **Project folder**: `macos-dev-toolkit-manager`
+- **Script name**: `safe_update.py`
 - More descriptive and purposeful names
 - Emphasizes macOS development toolkit management
 - Script name emphasizes safety focus
