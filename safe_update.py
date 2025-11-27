@@ -60,6 +60,23 @@ except ImportError:
     print("Install with: pip install rich")
 
 
+def validate_package_name(name: str) -> bool:
+    """
+    Validate package name to prevent command injection.
+
+    Args:
+        name: Package name to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    import re
+    # Allow alphanumeric, hyphens, underscores, dots, @, and forward slashes (for npm scoped packages)
+    # Examples: python, python3, @types/node, some-package_v2.0
+    pattern = r'^[@a-zA-Z0-9_.\-/]+$'
+    return bool(re.match(pattern, name)) and len(name) < 200
+
+
 class SystemUpgradeManager:
     """
     Main class for managing system package upgrades.
@@ -177,13 +194,17 @@ class SystemUpgradeManager:
         Note:
             All commands are logged before execution.
             Commands are executed using /bin/zsh shell.
+
+        Security:
+            Uses shell=True to support pipes (|) and redirections (>).
+            Package names are validated before command execution to prevent injection.
         """
         self.log(f"Running: {cmd}")
-        
+
         try:
             result = subprocess.run(
                 cmd,
-                shell=True,
+                shell=True,  # Required for pipes/redirects; package names validated
                 capture_output=capture,
                 text=True,
                 executable="/bin/zsh"
@@ -395,6 +416,9 @@ class SystemUpgradeManager:
         if safe_packages:
             self.print(f"\n[bold]Upgrading {len(safe_packages)} safe package(s)...[/bold]")
             for pkg in safe_packages:
+                if not validate_package_name(pkg):
+                    self.print(f"[red]✗[/red] Invalid package name: {pkg}")
+                    continue
                 self.log(f"Upgrading {pkg}...")
                 code, _, _ = self.run_command(f"brew upgrade {pkg}")
                 if code == 0:
@@ -413,6 +437,9 @@ class SystemUpgradeManager:
             for pkg in unsafe_packages:
                 is_safe, reason = self.is_safe_upgrade(pkg['current'], pkg['latest'])
                 self.print(f"  {pkg['name']}: {reason}")
+                if not validate_package_name(pkg['name']):
+                    self.print(f"[red]✗[/red] Invalid package name: {pkg['name']}")
+                    continue
                 if self.confirm(f"  Upgrade {pkg['name']} anyway?"):
                     code, _, _ = self.run_command(f"brew upgrade {pkg['name']}")
                     if code == 0:

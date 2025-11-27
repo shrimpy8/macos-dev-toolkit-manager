@@ -1,8 +1,19 @@
 # macOS Dev Toolkit Manager
 
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
+![Rich](https://img.shields.io/badge/Rich-UI-purple.svg)
+
 An interactive Python script that safely manages upgrades for Homebrew, Conda, Python, and npm with logging and rollback capability.
 
 **Script Name:** `safe_update.py` - Emphasizing safe, controlled upgrades for your development environment.
+
+## Preview
+
+![Main Menu Screenshot](screenshots/main-menu.png)
+
+*Interactive menu with rich UI showing upgrade options and system status*
 
 ## Features
 
@@ -216,6 +227,25 @@ Fix with: `sudo chown -R $(whoami) $(npm config get prefix)/{lib/node_modules,bi
 - macOS (tested on macOS 15.1+)
 - zsh shell
 - Homebrew, Conda, and/or npm installed
+- Optional: `rich` library for enhanced UI (`pip install -r requirements.txt`)
+
+## Security Features
+
+### Command Injection Prevention
+- **Package Name Validation**: All package names validated before use in shell commands
+- **Controlled Execution**: Uses shell=True only for pipes/redirects with validated inputs
+- **Input Sanitization**: Comprehensive validation using regex patterns
+
+### Safe Defaults
+- **System Python Protection**: Never modifies macOS system Python
+- **Backup First**: Always creates snapshots before making changes
+- **Comprehensive Logging**: All actions logged for audit trail
+- **Error Handling**: Graceful failure handling with proper error messages
+
+### Secure Dependencies
+- **Pinned Requirements**: `requirements.txt` with version constraints
+- **Minimal Dependencies**: Only `rich` library for UI (optional)
+- **No Untrusted Input**: All commands are hardcoded or validated
 
 ## License
 

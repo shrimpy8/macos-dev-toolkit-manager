@@ -1,0 +1,6 @@
+# Dependencies for macOS Dev Toolkit Manager
+# Install with: pip install -r requirements.txt
+
+# Rich library for beautiful terminal output
+# Version pinned to prevent breaking changes
+rich>=13.7.0,<14.0.0
