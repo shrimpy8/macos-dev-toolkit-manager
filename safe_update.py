@@ -233,15 +233,35 @@ class SystemUpgradeManager:
             "3.12.5" → (3, 12, 5)
             "v10.2.1" → (10, 2, 1)
             "conda 25.9.1" → (25, 9, 1)
+            "3.12.5-beta" → (3, 12, 5)
+            "Homebrew 4.2.11-25-g123abc" → (4, 2, 11)
+            "10.2.1.post1" → (10, 2, 1)
+        
+        Note:
+            Uses regex to extract the first numeric version pattern (X.Y.Z)
+            from the string, ignoring pre-release/build suffixes and prefixes.
         """
         try:
-            # Remove common prefixes (v, conda, etc.)
-            version_str = version_str.replace('v', '').replace('conda', '').strip()
-            parts = version_str.split('.')
-            major = int(parts[0]) if len(parts) > 0 else 0
-            minor = int(parts[1]) if len(parts) > 1 else 0
-            patch = int(parts[2]) if len(parts) > 2 else 0
-            return (major, minor, patch)
+            import re
+            # Extract first occurrence of X.Y.Z pattern (numeric version components only)
+            # This handles versions with suffixes like -beta, -rc1, .post1, etc.
+            match = re.search(r'(\d+)\.(\d+)\.(\d+)', version_str)
+            if match:
+                return tuple(map(int, match.groups()))
+            
+            # Fallback: try to parse X.Y format (if only major.minor available)
+            match = re.search(r'(\d+)\.(\d+)', version_str)
+            if match:
+                major, minor = map(int, match.groups())
+                return (major, minor, 0)
+            
+            # Fallback: try to parse just major version
+            match = re.search(r'(\d+)', version_str)
+            if match:
+                return (int(match.group(1)), 0, 0)
+            
+            # No numeric version found
+            return (0, 0, 0)
         except:
             return (0, 0, 0)
     
@@ -444,6 +464,8 @@ class SystemUpgradeManager:
                     code, _, _ = self.run_command(f"brew upgrade {pkg['name']}")
                     if code == 0:
                         self.print(f"[green]✓[/green] Upgraded {pkg['name']}")
+                    else:
+                        self.print(f"[red]✗[/red] Failed to upgrade {pkg['name']}")
         
         # Cleanup old versions and cache
         if self.confirm("\nRun brew cleanup?"):
@@ -537,12 +559,17 @@ class SystemUpgradeManager:
         self.print(f"\nUpgrade available: {info['current']} → {info['latest']}")
         self.print(f"Safety: {reason}")
         
-        # Prompt if upgrade is not safe (not a patch update)
-        if not is_safe and not self.confirm(f"\n{reason}. Upgrade anyway?"):
-            return
+        # Determine if we should proceed with single, clear confirmation prompt
+        should_upgrade = False
+        if is_safe:
+            # Safe upgrade (patch version) - ask for standard confirmation
+            should_upgrade = self.confirm("\nProceed with conda upgrade?")
+        else:
+            # Unsafe upgrade (minor/major version) - require explicit confirmation with warning
+            should_upgrade = self.confirm(f"\n{reason}. Upgrade anyway?")
         
-        # Execute upgrade if safe or user confirmed
-        if is_safe or self.confirm("\nProceed with conda upgrade?"):
+        # Execute upgrade if user approved
+        if should_upgrade:
             self.print("\n[bold]Upgrading Conda...[/bold]")
             code, _, _ = self.run_command("conda update -n base -c defaults conda -y")
             
@@ -745,14 +772,18 @@ class SystemUpgradeManager:
         self.print(f"Safety: {reason}")
         self.print(f"Source: {info['source']}")
         
-        # Show warning for non-patch updates
-        if not is_safe:
-            self.print(f"[yellow]⚠ Python upgrade skipped: {reason}[/yellow]")
-            if not self.confirm("\nUpgrade anyway?"):
-                return
+        # Determine if we should proceed with single, clear confirmation prompt
+        should_upgrade = False
+        if is_safe:
+            # Safe upgrade (patch version) - ask for standard confirmation
+            should_upgrade = self.confirm("\nProceed with Python upgrade?")
+        else:
+            # Unsafe upgrade (minor/major version) - require explicit confirmation with warning
+            self.print(f"[yellow]⚠ {reason}[/yellow]")
+            should_upgrade = self.confirm("\nUpgrade anyway?")
         
-        # Final confirmation before upgrade
-        if self.confirm("\nProceed with Python upgrade?"):
+        # Execute upgrade if user approved
+        if should_upgrade:
             self.print("\n[bold]Upgrading Python...[/bold]")
             
             # Execute upgrade based on source
@@ -812,10 +843,14 @@ class SystemUpgradeManager:
         latest_version = latest if code == 0 else current_version
         
         # Check for outdated global packages
+        # Note: npm outdated returns exit code 1 when outdated packages exist,
+        # and exit code 0 when all packages are up to date. We need to check
+        # for output regardless of exit code.
         code, output, _ = self.run_command("npm outdated -g --json")
         outdated_packages = []
         
-        if code == 0 and output:
+        # Process output if available (exit code 0 or 1 are both valid)
+        if output and output.strip():
             try:
                 data = json.loads(output)
                 for name, details in data.items():
@@ -853,14 +888,26 @@ class SystemUpgradeManager:
         
         Process:
         1. Display table of outdated global packages
-        2. Upgrade safe (patch) packages automatically
-        3. Prompt for unsafe (minor/major) packages
-        4. Upgrade npm itself last (best practice)
-        5. Verify npm cache if user confirms
+        2. Validate package names to prevent command injection
+        3. Upgrade safe (patch) packages automatically
+        4. Prompt for unsafe (minor/major) packages
+        5. Upgrade npm itself last (best practice)
+        6. Verify npm cache if user confirms
         
         Safety:
-        - Patch updates: Upgraded automatically
-        - Minor/major updates: Require user confirmation
+        - Patch updates: Upgraded automatically with user confirmation
+        - Minor/major updates: Require explicit user confirmation
+        - All package names validated before execution (security)
+        - Failed upgrades are reported to user
+        
+        Security:
+        - Package names are validated via validate_package_name() to prevent
+          command injection attacks before being passed to shell commands.
+        - Invalid package names are skipped with clear error messages.
+        
+        Error Handling:
+        - Both successful and failed upgrades are reported to the user.
+        - If a package fails to upgrade, execution continues with remaining packages.
         
         Note:
             npm itself is upgraded LAST to avoid potential issues
@@ -891,7 +938,8 @@ class SystemUpgradeManager:
                     print(f"  {pkg['name']}: {pkg['current']} -> {pkg['latest']} ({reason})")
             
             if self.confirm("\nUpgrade global packages?"):
-                # Upgrade safe packages (patch updates)
+                # Upgrade safe packages (patch updates only)
+                # Package names are extracted from npm outdated --json output
                 safe_packages = [
                     pkg['name'] for pkg in info['outdated_packages']
                     if self.is_safe_upgrade(pkg['current'], pkg['latest'])[0]
@@ -900,10 +948,19 @@ class SystemUpgradeManager:
                 if safe_packages:
                     self.print(f"\n[bold]Upgrading {len(safe_packages)} safe package(s)...[/bold]")
                     for pkg in safe_packages:
+                        # Security: Validate package name to prevent command injection
+                        if not validate_package_name(pkg):
+                            self.print(f"[red]✗[/red] Invalid package name: {pkg}")
+                            continue
+                        
                         self.log(f"Upgrading {pkg}...")
                         code, _, _ = self.run_command(f"npm install -g {pkg}@latest")
+                        
+                        # Report success or failure to user
                         if code == 0:
                             self.print(f"[green]✓[/green] Upgraded {pkg}")
+                        else:
+                            self.print(f"[red]✗[/red] Failed to upgrade {pkg}")
                 
                 # Handle packages requiring manual review
                 unsafe_packages = [
@@ -911,29 +968,49 @@ class SystemUpgradeManager:
                     if not self.is_safe_upgrade(pkg['current'], pkg['latest'])[0]
                 ]
                 
+                # Handle packages with minor/major version updates
+                # These require explicit user confirmation due to potential breaking changes
                 if unsafe_packages:
                     self.print(f"\n[yellow]⚠ {len(unsafe_packages)} package(s) require manual review[/yellow]")
                     for pkg in unsafe_packages:
                         is_safe, reason = self.is_safe_upgrade(pkg['current'], pkg['latest'])
                         self.print(f"  {pkg['name']}: {reason}")
+                        
+                        # Security: Validate package name to prevent command injection
+                        if not validate_package_name(pkg['name']):
+                            self.print(f"[red]✗[/red] Invalid package name: {pkg['name']}")
+                            continue
+                        
+                        # Ask user for explicit confirmation
                         if self.confirm(f"  Upgrade {pkg['name']} anyway?"):
                             code, _, _ = self.run_command(f"npm install -g {pkg['name']}@latest")
+                            
+                            # Report success or failure to user
                             if code == 0:
                                 self.print(f"[green]✓[/green] Upgraded {pkg['name']}")
+                            else:
+                                self.print(f"[red]✗[/red] Failed to upgrade {pkg['name']}")
         
         # Upgrade npm itself LAST (best practice)
+        # npm should be upgraded after all global packages to avoid version conflicts
         if info['current'] != info['latest']:
             is_safe, reason = self.is_safe_upgrade(info['current'], info['latest'])
             
             self.print(f"\n[bold]npm upgrade available:[/bold] {info['current']} → {info['latest']}")
             self.print(f"Safety: {reason}")
             
-            # Prompt if not a safe upgrade
-            if not is_safe and not self.confirm(f"\n{reason}. Upgrade anyway?"):
-                return
+            # Determine if we should proceed with single, clear confirmation prompt
+            # Fixed: Previous version had confusing double-confirmation logic
+            should_upgrade = False
+            if is_safe:
+                # Safe upgrade (patch version) - ask for standard confirmation
+                should_upgrade = self.confirm("\nUpgrade npm itself?")
+            else:
+                # Unsafe upgrade (minor/major version) - require explicit confirmation with warning
+                should_upgrade = self.confirm(f"\n{reason}. Upgrade anyway?")
             
-            # Execute npm upgrade
-            if is_safe or self.confirm("\nUpgrade npm itself?"):
+            # Execute npm upgrade if user approved
+            if should_upgrade:
                 self.print("\n[bold]Upgrading npm...[/bold]")
                 code, _, _ = self.run_command("npm install -g npm@latest")
                 
